@@ -1,16 +1,15 @@
 
 import tensorflow as tf
 import numpy as np
-from tensorflow.contrib import rnn
 from tensorflow.examples.tutorials.mnist import input_data
-
+import time
 # 设置 GPU 按需增长
 config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
 sess = tf.Session(config=config)
 
 # 首先导入数据，看一下数据的形式
-mnist = input_data.read_data_sets('I:\\mnist', one_hot=True)
+mnist = input_data.read_data_sets('.//mnist//', one_hot=True)
 print(mnist.train.images.shape)
 
 lr = 1e-3
@@ -18,8 +17,8 @@ lr = 1e-3
 #batch_size = tf.placeholder(tf.int32)  # 注意类型必须为 tf.int32
 # 在 1.0 版本以后请使用 ：
 keep_prob = tf.placeholder(tf.float32, [])
-batch_size = tf.placeholder(tf.int32, [])
-
+#batch_size = tf.placeholder(tf.int32, [])
+batch_size =32
 # 每个时刻的输入特征是28维的，就是每个时刻输入一行，一行有 28 个像素
 input_size = 28
 # 时序持续长度为28，即每做一次预测，需要先输入28行
@@ -39,16 +38,21 @@ y = tf.placeholder(tf.float32, [None, class_num])
 # 下面几个步骤是实现 RNN / LSTM 的关键
 ####################################################################
 # **步骤1：RNN 的输入shape = (batch_size, timestep_size, input_size)
-X = tf.reshape(_X, [-1, 28, 28])
+X = tf.reshape(_X, [-1, timestep_size, input_size])
 
 # **步骤2：定义一层 LSTM_cell，只需要说明 hidden_size, 它会自动匹配输入的 X 的维度
-lstm_cell = rnn.BasicLSTMCell(num_units=hidden_size, forget_bias=1.0, state_is_tuple=True)
+lstm_cell = tf.contrib.rnn.BasicLSTMCell(num_units=hidden_size)
 
 # **步骤3：添加 dropout layer, 一般只设置 output_keep_prob
-lstm_cell = rnn.DropoutWrapper(cell=lstm_cell, input_keep_prob=1.0, output_keep_prob=keep_prob)
+lstm_cell = tf.contrib.rnn.DropoutWrapper(cell=lstm_cell, input_keep_prob=1.0, output_keep_prob=keep_prob)
 
 # **步骤4：调用 MultiRNNCell 来实现多层 LSTM
-mlstm_cell = rnn.MultiRNNCell([lstm_cell] * layer_num, state_is_tuple=True)
+stack_rnn = []
+
+for i in range(layer_num):
+    stack_rnn.append(tf.contrib.rnn.BasicLSTMCell(hidden_size, state_is_tuple=True))
+    #stack_rnn.append(lstm_cell)
+mlstm_cell = tf.contrib.rnn.MultiRNNCell(stack_rnn, state_is_tuple=True)
 
 # **步骤5：用全零来初始化state
 init_state = mlstm_cell.zero_state(batch_size, dtype=tf.float32)
@@ -78,9 +82,7 @@ h_state = outputs[:, -1, :]  # 或者 h_state = state[-1][1]
 #定义lstm网络
 # 上面 LSTM 部分的输出会是一个 [hidden_size] 的tensor，我们要分类的话，还需要接一个 softmax 层
 # 首先定义 softmax 的连接权重矩阵和偏置
-# out_W = tf.placeholder(tf.float32, [hidden_size, class_num], name='out_Weights')
-# out_bias = tf.placeholder(tf.float32, [class_num], name='out_bias')
-# 开始训练和测试
+# 全连接+softmax
 W = tf.Variable(tf.truncated_normal([hidden_size, class_num], stddev=0.1), dtype=tf.float32)
 bias = tf.Variable(tf.constant(0.1,shape=[class_num]), dtype=tf.float32)
 y_pre = tf.nn.softmax(tf.matmul(h_state, W) + bias)
@@ -95,16 +97,19 @@ accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
 
 
 sess.run(tf.global_variables_initializer())
+start = time.time()
 for i in range(2000):
-    _batch_size = 128
-    batch = mnist.train.next_batch(_batch_size)
-    if (i+1)%200 == 0:
+    batch = mnist.train.next_batch(batch_size)
+    if (i+1)%1== 0:
+        cost = time.time() - start
+        start = time.time()
         train_accuracy = sess.run(accuracy, feed_dict={
-            _X:batch[0], y: batch[1], keep_prob: 1.0, batch_size: _batch_size})
+            _X:batch[0], y: batch[1], keep_prob: 1.0})
         # 已经迭代完成的 epoch 数: mnist.train.epochs_completed
         print("Iter%d, step %d, training accuracy %g" % ( mnist.train.epochs_completed, (i+1), train_accuracy))
-    sess.run(train_op, feed_dict={_X: batch[0], y: batch[1], keep_prob: 0.5, batch_size: _batch_size})
+        print("costtime:%s"%(cost))
+    sess.run(train_op, feed_dict={_X: batch[0], y: batch[1], keep_prob: 0.5})
 
 # 计算测试数据的准确率
 print( "test accuracy %g"% sess.run(accuracy, feed_dict={
-    _X: mnist.test.images, y: mnist.test.labels, keep_prob: 1.0, batch_size:mnist.test.images.shape[0]}))
+    _X: mnist.test.images, y: mnist.test.labels, keep_prob: 1.0}))
